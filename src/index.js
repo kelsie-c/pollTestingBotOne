@@ -229,8 +229,10 @@ client.on('interactionCreate', async (interaction) => {
             }
 
         } catch (error) {
-            console.error('Error creating poll:', error);
-    
+            if (error.code !== 10062 && error.code !== 40060) {
+                console.error('Error creating poll:', error);
+            }
+            
             if (!interaction.replied && !interaction.deferred) {
                 try {
                     await interaction.reply({
@@ -238,7 +240,10 @@ client.on('interactionCreate', async (interaction) => {
                         flags: MessageFlags.Ephemeral
                     });
                 } catch (replyError) {
-                    console.error('Could not send error reply:', replyError);
+                    // Suppress interaction already acknowledged errors
+                    if (replyError.code !== 40060) {
+                        console.error('Could not send error reply:', replyError);
+                    }
                 }
             }
         }
