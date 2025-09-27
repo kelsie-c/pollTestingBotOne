@@ -1,0 +1,32 @@
+{
+  "name": "discord-poll-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot for creating custom polls with emojis",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "polls",
+    "emoji"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
