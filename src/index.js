@@ -230,7 +230,7 @@ client.on('interactionCreate', async (interaction) => {
 
         } catch (error) {
             console.error('Error creating poll:', error);
-            
+    
             if (!interaction.replied && !interaction.deferred) {
                 try {
                     await interaction.reply({
