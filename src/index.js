@@ -12,8 +12,8 @@ const config = {
 };
 
 // Helper function to get server-specific config
-function getConfig(guildId) {
-    const serverConfig = getServerConfig(guildId);
+async function getConfig(guildId) {
+    const serverConfig = await getServerConfig(guildId);
     return {
         botName: serverConfig.bot_name,
         defaultEmojis: parseEmojis(serverConfig.default_emojis),
@@ -24,8 +24,8 @@ function getConfig(guildId) {
 }
 
 // Utility function to create poll embed
-function createPollEmbed(question, options, emojis, author, guildId) {
-    const serverConfig = getConfig(guildId);
+async function createPollEmbed(question, options, emojis, author, guildId) {
+    const serverConfig = await getConfig(guildId);
     
     const embed = new EmbedBuilder()
         .setTitle(`📊 ${question}`)
@@ -71,7 +71,7 @@ client.on('guildCreate', async (guild) => {
     console.log(`✅ Bot added to new server: ${guild.name} (ID: ${guild.id})`);
     
     // Create default config for new server
-    getServerConfig(guild.id);
+    await getServerConfig(guild.id);
     
     // Try to send a welcome message to the system channel or first available channel
     const welcomeEmbed = new EmbedBuilder()
@@ -127,13 +127,13 @@ client.on('messageCreate', async (message) => {
 
             const question = matches[0].slice(1, -1); // Remove quotes
             const options = matches.slice(1).map(match => match.slice(1, -1)); // Remove quotes from options
-            const serverConfig = getConfig(message.guild.id);
+            const serverConfig = await getConfig(message.guild.id);
 
             // Use default emojis for now
             const emojis = serverConfig.defaultEmojis.slice(0, options.length);
 
             // Create and send poll embed
-            const pollEmbed = createPollEmbed(question, options, emojis, message.member, message.guild.id);
+            const pollEmbed = await createPollEmbed(question, options, emojis, message.member, message.guild.id);
             const pollMessage = await message.channel.send({ embeds: [pollEmbed] });
 
             // Add reactions for voting
@@ -189,7 +189,7 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
 
-            const serverConfig = getConfig(interaction.guild.id);
+            const serverConfig = await getConfig(interaction.guild.id);
 
             // Get custom emojis if provided
             const customEmojisString = interaction.options.getString('emojis');
@@ -206,7 +206,7 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             // Create poll embed
-            const pollEmbed = createPollEmbed(question, options, emojis, interaction.member, interaction.guild.id);
+            const pollEmbed = await createPollEmbed(question, options, emojis, interaction.member, interaction.guild.id);
             
             // Send the poll embed
             await interaction.reply({ embeds: [pollEmbed] });
@@ -342,7 +342,7 @@ client.on('interactionCreate', async (interaction) => {
                     break;
 
                 case 'view':
-                    const currentConfig = getServerConfig(interaction.guild.id);
+                    const currentConfig = await getServerConfig(interaction.guild.id);
                     const channel_mention = currentConfig.poll_channel_id ? `<#${currentConfig.poll_channel_id}>` : 'Not set';
                     const role_mention = currentConfig.poll_role_id ? `<@&${currentConfig.poll_role_id}>` : 'Not set';
                     

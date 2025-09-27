@@ -8,7 +8,6 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "build": "node src/smart-deploy.js",
     "postinstall": "node src/smart-deploy.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -18,7 +17,7 @@
   "dependencies": {
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "better-sqlite3": "^9.6.0"
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
