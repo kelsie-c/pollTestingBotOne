@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "build": "echo 'No build step required'",
+    "build": "node src/smart-deploy.js",
+    "postinstall": "node src/smart-deploy.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["discord", "bot", "polls", "emoji"],
