@@ -175,7 +175,8 @@ async function smartDeploy() {
         console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
         let deployRoute;
-        if (process.env.GUILD_ID && process.env.NODE_ENV === 'development') {
+        // In smart-deploy.js, find this section and fix it:
+        if (process.env.GUILD_ID && process.env.NODE_ENV !== 'production') {
             deployRoute = Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID);
             console.log('Deploying to guild (development mode)');
         } else {
