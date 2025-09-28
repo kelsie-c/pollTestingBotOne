@@ -1,8 +1,8 @@
-import { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ButtonBuilder, ActionRowBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import dotenv from 'dotenv';
 import { getServerConfig, updateServerConfig, parseEmojis, parseColor } from './database.js';
 
-// Load environment variables first
+// Load environment variables
 dotenv.config();
 
 // Bot configuration from environment (fallback defaults)
@@ -10,6 +10,86 @@ const config = {
     token: process.env.DISCORD_TOKEN,
     clientId: process.env.CLIENT_ID
 };
+
+// Temporary storage for poll data (15 minute expiry)
+const pollStorage = new Map();
+
+// Clean up expired poll data every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, data] of pollStorage.entries()) {
+        if (now - data.createdAt > 15 * 60 * 1000) { // 15 minutes
+            pollStorage.delete(key);
+        }
+    }
+}, 5 * 60 * 1000);
+
+// Helper functions for poll editing
+function storePollData(messageId, pollData) {
+    pollStorage.set(messageId, {
+        ...pollData,
+        createdAt: Date.now()
+    });
+}
+
+function getPollData(messageId) {
+    return pollStorage.get(messageId);
+}
+
+function createEditButton(messageId) {
+    return new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`edit_poll_${messageId}`)
+                .setLabel('Edit Poll')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji('✏️')
+        );
+}
+
+function createEditModal(pollData) {
+    const modal = new ModalBuilder()
+        .setCustomId(`edit_modal_${pollData.messageId}`)
+        .setTitle('Edit Your Poll');
+
+    // Question input
+    const questionInput = new TextInputBuilder()
+        .setCustomId('question')
+        .setLabel('Poll Question')
+        .setStyle(TextInputStyle.Short)
+        .setValue(pollData.question)
+        .setMaxLength(256)
+        .setRequired(true);
+
+    // Options input (combine all options into one text area)
+    const optionsText = pollData.options.join('\n');
+    const optionsInput = new TextInputBuilder()
+        .setCustomId('options')
+        .setLabel('Poll Options (one per line, max 10)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setValue(optionsText)
+        .setMaxLength(1000)
+        .setRequired(true);
+
+    // Emojis input with short label
+    const emojisText = pollData.emojis.join(',');
+    const emojisInput = new TextInputBuilder()
+        .setCustomId('emojis')
+        .setLabel('Custom Emojis (Win+. / Cmd+Ctrl+Space)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setValue(emojisText)
+        .setPlaceholder('🔥,💯,⭐,❤️,🎉,👍,💪,🚀')
+        .setMaxLength(300)
+        .setRequired(false);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(questionInput),
+        new ActionRowBuilder().addComponents(optionsInput),
+        new ActionRowBuilder().addComponents(emojisInput)
+    );
+
+    return modal;
+}
 
 // Helper function to get server-specific config
 async function getConfig(guildId) {
@@ -21,6 +101,29 @@ async function getConfig(guildId) {
         pollRoleId: serverConfig.poll_role_id,
         embedColor: parseColor(serverConfig.embed_color)
     };
+}
+
+// Utility function to create poll embed
+async function createPollEmbed(question, options, emojis, author, guildId) {
+    const serverConfig = await getConfig(guildId);
+    
+    const embed = new EmbedBuilder()
+        .setTitle(`${question}`)
+        .setColor(serverConfig.embedColor)
+        .setTimestamp()
+        .setFooter({ text: `Created by ${author.displayName}`, iconURL: author.displayAvatarURL() });
+
+    // Create description with emoji bullet points
+    let description = '** ** ** **\n';
+    options.forEach((option, index) => {
+        const emoji = emojis[index] || serverConfig.defaultEmojis[index] || '❓';
+        description += `${emoji} ${option}\n`;
+    });
+    description += `\n⋅ ⋅ ⋅ ⋅ ⋅ ⋅ ⋅ ⋅`;
+    
+    embed.setDescription(description);
+
+    return embed;
 }
 
 // Create a new client instance
@@ -35,7 +138,7 @@ const client = new Client({
 
 // When the client is ready, run this code
 client.once('ready', () => {
-    console.log(`Poll Bot is online!`);
+    console.log('Poll Bot is online!');
     console.log(`Logged in as ${client.user.tag}`);
     console.log(`Running in ${process.env.NODE_ENV || 'development'} mode`);
     console.log(`Connected to ${client.guilds.cache.size} server(s)`);
@@ -67,6 +170,7 @@ Admins can use these commands:
 • \`/pollconfig role\` - Set notification role  
 • \`/pollconfig color\` - Set embed color
 • \`/pollconfig emojis\` - Set default emojis
+• \`/pollconfig name\` - Set bot nickname
 
 Let's create some engaging polls!`)
         .setColor(0x00AE86)
@@ -105,25 +209,14 @@ client.on('messageCreate', async (message) => {
 
             const question = matches[0].slice(1, -1); // Remove quotes
             const options = matches.slice(1).map(match => match.slice(1, -1)); // Remove quotes from options
-            
-            // Use default emojis to avoid database delays
-            const defaultEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-            const emojis = defaultEmojis.slice(0, options.length);
+            const serverConfig = await getConfig(message.guild.id);
+
+            // Use default emojis for now
+            const emojis = serverConfig.defaultEmojis.slice(0, options.length);
 
             // Create and send poll embed
-            const embed = new EmbedBuilder()
-                .setTitle(`📊 ${question}`)
-                .setColor(0x00AE86)
-                .setTimestamp()
-                .setFooter({ text: `Created by ${message.member.displayName}`, iconURL: message.member.displayAvatarURL() });
-
-            let description = '';
-            options.forEach((option, index) => {
-                description += `${emojis[index]} ${option}\n`;
-            });
-            embed.setDescription(description);
-
-            const pollMessage = await message.channel.send({ embeds: [embed] });
+            const pollEmbed = await createPollEmbed(question, options, emojis, message.member, message.guild.id);
+            const pollMessage = await message.channel.send({ embeds: [pollEmbed] });
 
             // Add reactions for voting
             try {
@@ -135,14 +228,13 @@ client.on('messageCreate', async (message) => {
                 await message.channel.send('Poll created but couldn\'t add reaction emojis. Please add them manually!');
             }
 
-            // Try to get server config for role tag (async, don't block)
+            // Send role tag as separate message if configured
             try {
-                const serverConfig = await getConfig(message.guild.id);
                 if (serverConfig.pollRoleId) {
                     await message.channel.send(`<@&${serverConfig.pollRoleId}>`);
                 }
-            } catch (configError) {
-                console.error('Could not get server config for role tag:', configError);
+            } catch (roleTagError) {
+                console.error('Error sending role tag:', roleTagError);
             }
 
         } catch (error) {
@@ -155,6 +247,126 @@ client.on('messageCreate', async (message) => {
 
 // Slash command handler
 client.on('interactionCreate', async (interaction) => {
+    // Handle button interactions
+    if (interaction.isButton()) {
+        if (interaction.customId.startsWith('edit_poll_')) {
+            const messageId = interaction.customId.replace('edit_poll_', '');
+            const pollData = getPollData(messageId);
+            
+            if (!pollData) {
+                return await interaction.reply({
+                    content: '❌ This poll can no longer be edited (expired after 15 minutes).',
+                    ephemeral: true
+                });
+            }
+            
+            // Check if user is the original author
+            if (pollData.authorId !== interaction.user.id) {
+                return await interaction.reply({
+                    content: '❌ Only the poll creator can edit this poll.',
+                    ephemeral: true
+                });
+            }
+            
+            const modal = createEditModal(pollData);
+            await interaction.showModal(modal);
+        }
+        return;
+    }
+    
+    // Handle modal submissions
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('edit_modal_')) {
+            const messageId = interaction.customId.replace('edit_modal_', '');
+            const pollData = getPollData(messageId);
+            
+            if (!pollData) {
+                return await interaction.reply({
+                    content: '❌ This poll can no longer be edited (expired after 15 minutes).',
+                    ephemeral: true
+                });
+            }
+            
+            try {
+                // Immediately respond to avoid timeout
+                await interaction.reply({
+                    content: '⏳ Updating your poll...',
+                    ephemeral: true
+                });
+
+                // Get updated data from modal
+                const newQuestion = interaction.fields.getTextInputValue('question');
+                const optionsText = interaction.fields.getTextInputValue('options');
+                const emojisText = interaction.fields.getTextInputValue('emojis') || '';
+                
+                // Parse options
+                const newOptions = optionsText.split('\n')
+                    .map(opt => opt.trim())
+                    .filter(opt => opt.length > 0);
+                
+                if (newOptions.length < 2) {
+                    return await interaction.editReply({
+                        content: '❌ You need at least 2 options for a poll!'
+                    });
+                }
+                
+                if (newOptions.length > 10) {
+                    return await interaction.editReply({
+                        content: '❌ Maximum 10 options allowed!'
+                    });
+                }
+                
+                // Parse emojis - do database call after responding
+                const serverConfig = await getConfig(interaction.guild.id);
+                let newEmojis = serverConfig.defaultEmojis.slice(0, newOptions.length);
+                
+                if (emojisText.trim()) {
+                    const customEmojis = emojisText.split(',').map(emoji => emoji.trim());
+                    if (customEmojis.length >= newOptions.length) {
+                        newEmojis = customEmojis.slice(0, newOptions.length);
+                    } else {
+                        newEmojis = [...customEmojis, ...serverConfig.defaultEmojis.slice(customEmojis.length)].slice(0, newOptions.length);
+                    }
+                }
+                
+                // Create new poll embed
+                const member = await interaction.guild.members.fetch(pollData.authorId);
+                const newPollEmbed = await createPollEmbed(newQuestion, newOptions, newEmojis, member, interaction.guild.id);
+                
+                // Update the original message
+                const originalMessage = await interaction.channel.messages.fetch(messageId);
+                await originalMessage.edit({ embeds: [newPollEmbed] });
+                
+                // Clear old reactions and add new ones
+                await originalMessage.reactions.removeAll();
+                for (let i = 0; i < newOptions.length; i++) {
+                    await originalMessage.react(newEmojis[i]);
+                }
+                
+                // Update stored poll data
+                storePollData(messageId, {
+                    messageId: messageId,
+                    question: newQuestion,
+                    options: newOptions,
+                    emojis: newEmojis,
+                    authorId: pollData.authorId,
+                    guildId: pollData.guildId
+                });
+                
+                await interaction.editReply({
+                    content: '✅ Poll updated successfully!'
+                });
+                
+            } catch (error) {
+                console.error('Error updating poll:', error);
+                await interaction.editReply({
+                    content: '❌ There was an error updating the poll!'
+                });
+            }
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'poll') {
@@ -175,76 +387,92 @@ client.on('interactionCreate', async (interaction) => {
             if (options.length < 2) {
                 return await interaction.reply({
                     content: 'You need at least 2 options for a poll!',
-                    flags: MessageFlags.Ephemeral
+                    ephemeral: true
                 });
             }
 
-            // Get custom emojis if provided, otherwise use defaults
+            const serverConfig = await getConfig(interaction.guild.id);
+
+            // Get custom emojis if provided
             const customEmojisString = interaction.options.getString('emojis');
-            const defaultEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-            let emojis = defaultEmojis.slice(0, options.length);
+            let emojis = serverConfig.defaultEmojis.slice(0, options.length);
             
             if (customEmojisString) {
                 const customEmojis = customEmojisString.split(',').map(emoji => emoji.trim());
                 if (customEmojis.length >= options.length) {
                     emojis = customEmojis.slice(0, options.length);
                 } else {
-                    emojis = [...customEmojis, ...defaultEmojis.slice(customEmojis.length)].slice(0, options.length);
+                    // If not enough custom emojis, use custom ones first, then defaults
+                    emojis = [...customEmojis, ...serverConfig.defaultEmojis.slice(customEmojis.length)].slice(0, options.length);
                 }
             }
 
-            // Create a simple embed without database calls
-            const embed = new EmbedBuilder()
-                .setTitle(`📊 ${question}`)
-                .setColor(0x00AE86)
-                .setTimestamp()
-                .setFooter({ text: `Created by ${interaction.member.displayName}`, iconURL: interaction.member.displayAvatarURL() });
-
-            // Create description with emoji bullet points
-            let description = '';
-            options.forEach((option, index) => {
-                description += `${emojis[index]} ${option}\n`;
-            });
-            embed.setDescription(description);
-
-            // Reply immediately with the poll
-            await interaction.reply({ embeds: [embed] });
+            // Create poll embed
+            const pollEmbed = await createPollEmbed(question, options, emojis, interaction.member, interaction.guild.id);
             
-            // Get the message and add reactions
+            // Send the poll embed
+            await interaction.reply({ embeds: [pollEmbed] });
+            
+            // Get the message to add reactions
             const pollMessage = await interaction.fetchReply();
             
-            // Add reactions
-            for (let i = 0; i < options.length; i++) {
-                await pollMessage.react(emojis[i]);
+            // Add reactions for voting
+            try {
+                for (let i = 0; i < options.length; i++) {
+                    await pollMessage.react(emojis[i]);
+                }
+            } catch (reactionError) {
+                console.error('Error adding reactions:', reactionError);
+                await interaction.followUp({
+                    content: 'Poll created but couldn\'t add reaction emojis. Please add them manually!',
+                    ephemeral: true
+                });
             }
 
-            // Try to get server config for role tag (async, don't block)
+            // Store poll data for editing and send edit button
             try {
-                const serverConfig = await getConfig(interaction.guild.id);
+                storePollData(pollMessage.id, {
+                    messageId: pollMessage.id,
+                    question: question,
+                    options: options,
+                    emojis: emojis,
+                    authorId: interaction.user.id,
+                    guildId: interaction.guild.id
+                });
+
+                const editButton = createEditButton(pollMessage.id);
+                await interaction.followUp({
+                    content: 'You can edit this poll for the next 15 minutes:',
+                    components: [editButton],
+                    ephemeral: true
+                });
+            } catch (editButtonError) {
+                console.error('Error setting up edit functionality:', editButtonError);
+                // Don't fail the whole poll if edit setup fails
+            }
+
+            // Send role tag as separate message if configured
+            try {
                 if (serverConfig.pollRoleId) {
                     await interaction.followUp(`<@&${serverConfig.pollRoleId}>`);
                 }
-            } catch (configError) {
-                console.error('Could not get server config for role tag:', configError);
+            } catch (roleTagError) {
+                console.error('Error sending role tag:', roleTagError);
             }
 
         } catch (error) {
-            if (error.code !== 10062 && error.code !== 40060) {
-                console.error('Error creating poll:', error);
-            }
+            console.error('Error creating poll with slash command:', error);
             
-            if (!interaction.replied && !interaction.deferred) {
-                try {
-                    await interaction.reply({
-                        content: 'There was an error creating the poll!',
-                        flags: MessageFlags.Ephemeral
-                    });
-                } catch (replyError) {
-                    // Suppress interaction already acknowledged errors
-                    if (replyError.code !== 40060) {
-                        console.error('Could not send error reply:', replyError);
-                    }
-                }
+            if (!interaction.replied) {
+                await interaction.reply({
+                    content: 'There was an error creating the poll!',
+                    ephemeral: true
+                });
+            } else {
+                await interaction.followUp({
+                    content: 'There was an error creating the poll!',
+                    ephemeral: true
+                });
             }
         }
     }
@@ -254,7 +482,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return await interaction.reply({
                 content: 'You need Administrator permissions to configure the poll bot!',
-                flags: MessageFlags.Ephemeral
+                ephemeral: true
             });
         }
 
@@ -267,14 +495,14 @@ client.on('interactionCreate', async (interaction) => {
                     if (channel.type !== 0) { // Not a text channel
                         return await interaction.reply({
                             content: 'Please select a text channel!',
-                            flags: MessageFlags.Ephemeral
+                            ephemeral: true
                         });
                     }
                     
                     await updateServerConfig(interaction.guild.id, { pollChannelId: channel.id });
                     await interaction.reply({
                         content: `Poll channel set to ${channel}`,
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
                     break;
 
@@ -283,7 +511,7 @@ client.on('interactionCreate', async (interaction) => {
                     await updateServerConfig(interaction.guild.id, { pollRoleId: role.id });
                     await interaction.reply({
                         content: `Poll notification role set to ${role}`,
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
                     break;
 
@@ -293,7 +521,7 @@ client.on('interactionCreate', async (interaction) => {
                     if (!/^[0-9A-F]{6}$/i.test(color)) {
                         return await interaction.reply({
                             content: 'Please provide a valid 6-digit hex color code (e.g., FF5733)',
-                            flags: MessageFlags.Ephemeral
+                            ephemeral: true
                         });
                     }
                     
@@ -306,7 +534,7 @@ client.on('interactionCreate', async (interaction) => {
                     
                     await interaction.reply({
                         embeds: [colorEmbed],
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
                     break;
 
@@ -317,24 +545,38 @@ client.on('interactionCreate', async (interaction) => {
                     if (emojiArray.length < 2) {
                         return await interaction.reply({
                             content: 'Please provide at least 2 emojis separated by commas!',
-                            flags: MessageFlags.Ephemeral
+                            ephemeral: true
                         });
                     }
                     
                     await updateServerConfig(interaction.guild.id, { defaultEmojis: emojis });
                     await interaction.reply({
                         content: `Default emojis set to: ${emojiArray.join(' ')}`,
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
                     break;
 
                 case 'name':
                     const name = interaction.options.getString('name');
+                    
+                    // Update database
                     await updateServerConfig(interaction.guild.id, { botName: name });
-                    await interaction.reply({
-                        content: `Bot name set to: **${name}**`,
-                        flags: MessageFlags.Ephemeral
-                    });
+                    
+                    // Set the bot's nickname in this server
+                    try {
+                        await interaction.guild.members.me.setNickname(name);
+                        await interaction.reply({
+                            content: `Bot name and nickname set to: **${name}**`,
+                            ephemeral: true
+                        });
+                    } catch (nicknameError) {
+                        console.error('Error setting nickname:', nicknameError);
+                        // Fallback if nickname change fails (permissions issue)
+                        await interaction.reply({
+                            content: `Bot name saved as: **${name}**\nNote: Could not change server nickname (may need "Change Nickname" permission)`,
+                            ephemeral: true
+                        });
+                    }
                     break;
 
                 case 'view':
@@ -356,25 +598,22 @@ client.on('interactionCreate', async (interaction) => {
                     
                     await interaction.reply({
                         embeds: [configEmbed],
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
                     break;
 
                 default:
                     await interaction.reply({
                         content: 'Unknown configuration option!',
-                        flags: MessageFlags.Ephemeral
+                        ephemeral: true
                     });
             }
         } catch (error) {
             console.error('Error handling pollconfig command:', error);
-            
-            if (!interaction.replied) {
-                await interaction.reply({
-                    content: 'There was an error updating the configuration!',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+            await interaction.reply({
+                content: 'There was an error updating the configuration!',
+                ephemeral: true
+            });
         }
     }
 });

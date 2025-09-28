@@ -138,7 +138,7 @@ async function deployCommands() {
         );
 
         console.log(`Successfully reloaded ${data.length} application (/) commands.`);
-        console.log('✅ Slash commands deployed successfully!');
+        console.log('Slash commands deployed successfully!');
         
         // List the deployed commands
         data.forEach(command => {
@@ -146,7 +146,7 @@ async function deployCommands() {
         });
         
     } catch (error) {
-        console.error('❌ Error deploying commands:', error);
+        console.error('Error deploying commands:', error);
     }
 }
 
